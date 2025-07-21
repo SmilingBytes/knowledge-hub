@@ -7,7 +7,6 @@
 ![category](https://img.shields.io/badge/🏷️%20category-etl--tools-blue?style=flat-square)
 [![docs](https://img.shields.io/badge/🔗%20docs-dbt--docs-blue?style=flat-square)](https://docs.getdbt.com)
 
-
 ## 🌟 Overview
 
 - **What it is:** dbt (data build tool) is an open-source framework for transforming raw data into reliable models using SQL and software engineering best practices.
@@ -18,13 +17,11 @@
   - **SQLMesh** – CI/CD-first with advanced diffing
   - **Airflow** – general-purpose orchestration with SQL support
 
-
 ![architecture](https://github.com/dbt-labs/dbt-core/blob/202cb7e51e218c7b29eb3b11ad058bd56b7739de/etc/dbt-transform.png)
 
-
-
 ## Table of Contents
-1. [Quick Start](#quick-start)
+
+1. [Getting Started](#getting-started)
 2. [Installation & Setup](#installation--setup)
 3. [Project Structure](#project-structure)
 4. [Core Concepts](#core-concepts)
@@ -40,50 +37,20 @@
 
 ---
 
-## Quick Start
+## Getting Started
 
-### What is dbt?
-dbt (data build tool) enables data teams to transform data in their warehouse by simply writing select statements. dbt handles turning these select statements into tables and views with proper dependency management, testing, and documentation.
+### Installation
 
-### Core Philosophy
-- **T**ransform data using SQL SELECT statements
-- **T**est your data transformations
-- **D**ocument your data models
-- **V**ersion control everything
+```bash
+pip install dbt-core dbt-snowflake  # or dbt-bigquery/dbt-snowflake
+dbt init my_project
+cd my_project
+```
 
 ---
 
-## Installation & Setup
+### Profile Configuration
 
-### Install dbt Core
-```bash
-# Install via pip (recommended)
-pip install dbt-core
-
-# Install with specific adapter (choose one)
-pip install dbt-snowflake
-pip install dbt-bigquery
-pip install dbt-redshift
-pip install dbt-postgres
-pip install dbt-databricks
-
-# Verify installation
-dbt --version
-```
-
-### Initialize Project
-```bash
-# Create new project
-dbt init my_project
-
-# Navigate to project
-cd my_project
-
-# Set up profiles.yml (connection details)
-dbt debug
-```
-
-### profiles.yml Configuration
 ```yaml
 my_project:
   outputs:
@@ -115,24 +82,29 @@ my_project:
 ## Project Structure
 
 ```
-my_dbt_project/
-├── dbt_project.yml          # Project configuration
-├── profiles.yml             # Connection profiles (keep secure!)
-├── packages.yml             # dbt packages dependencies
-├── analyses/                # Analytical SQL files
-├── data/                    # Seed files (CSV data)
-├── macros/                  # Reusable SQL functions
-├── models/                  # dbt models (SQL files)
-│   ├── staging/            # Raw data cleaning & standardization
-│   ├── intermediate/       # Business logic transformation
-│   ├── marts/             # Final business-ready models
-│   └── schema.yml         # Tests and documentation
-├── seeds/                  # CSV files for reference data
-├── snapshots/             # SCD Type 2 tables
-├── tests/                 # Custom data tests
-├── logs/                  # dbt run logs
-├── target/               # Compiled SQL (gitignored)
-└── dbt_packages/         # Downloaded packages (gitignored)
+my_project/
+├── models/
+│   ├── staging/
+│   │   └── stg_<source>.sql
+│   ├── intermediate/
+│   │   └── int_<logic>.sql
+│   ├── marts/
+│   │   ├── dim_<entity>.sql
+│   │   └── fact_<event>.sql
+├── snapshots/
+├── seeds/
+├── macros/
+├── analyses/
+├── tests/
+├── logs/
+├── target/
+├── dbt_packages/
+├── dbt_project.yml
+├── profiles.yml
+├── profiles.yml
+├── requirements.txt
+├── README.md
+└── packages.yml
 ```
 
 ---
@@ -140,15 +112,18 @@ my_dbt_project/
 ## Core Concepts
 
 ### Models
+
 Models are SQL SELECT statements that create tables or views in your warehouse.
 
 #### Model Types
+
 - **View** (default): Virtual table, computed at query time
 - **Table**: Materialized data, stored physically
 - **Incremental**: Appends/updates only new data
 - **Ephemeral**: CTE used by other models, not materialized
 
 ### Materializations
+
 ```sql
 -- In model file or dbt_project.yml
 {{ config(materialized='table') }}
@@ -158,7 +133,9 @@ Models are SQL SELECT statements that create tables or views in your warehouse.
 ```
 
 ### Sources
+
 External data that dbt doesn't create, defined in `sources.yml`:
+
 ```yaml
 sources:
   - name: raw_data
@@ -175,6 +152,7 @@ sources:
 ```
 
 ### References
+
 ```sql
 -- Reference another model
 SELECT * FROM {{ ref('my_model') }}
@@ -188,12 +166,13 @@ SELECT * FROM {{ source('raw_data', 'users') }}
 ## Model Development
 
 ### Basic Model Structure
+
 ```sql
 -- models/staging/stg_users.sql
 {{ config(materialized='view') }}
 
 WITH source_data AS (
-    SELECT 
+    SELECT
         id,
         email,
         created_at,
@@ -201,7 +180,7 @@ WITH source_data AS (
     FROM {{ source('raw_data', 'users') }}
 )
 
-SELECT 
+SELECT
     id AS user_id,
     email,
     created_at,
@@ -211,15 +190,17 @@ WHERE email IS NOT NULL
 ```
 
 ### Incremental Models
+
 ```sql
 -- models/marts/user_events.sql
 {{ config(
     materialized='incremental',
     unique_key='event_id',
-    on_schema_change='fail'
+    on_schema_change='sync_all_columns', -- or `append_new_columns`, `fail`
+    incremental_strategy='merge',  -- or 'append', 'delete+insert'
 ) }}
 
-SELECT 
+SELECT
     event_id,
     user_id,
     event_type,
@@ -231,23 +212,83 @@ FROM {{ source('events', 'user_events') }}
 {% endif %}
 ```
 
-### Model Configuration
+---
+
+## Configuration
+
+We can define configuration in the following file (order by priority):
+
+1. In the model file using `{{ config() }}` macro
+1. In the model properties file (`models/properties.yml`)
+1. In the project file (`dbt_project.yml`)
+
 ```sql
 -- In model file
 {{ config(
-    materialized='table',
-    sort='created_at',
-    dist='user_id',
-    pre_hook="GRANT SELECT ON {{ this }} TO role_read_only",
-    post_hook="CREATE INDEX IF NOT EXISTS idx_user_id ON {{ this }} (user_id)"
+    materialized="<materialization_name>",
+    sql_header="<string>",
+    unique_key='column_name_or_expression',
+    build_after="<dict>",
+    schema="<string>",
+    tags=["<string>"],
+    post_hook=[<sql>], -- "ANALYZE TABLE {{ this }} COMPUTE STATISTICS"
 ) }}
 ```
+
+<details>
+  <summary> <h3>📚 General Configuration</h3></summary>
+
+🏢 **database**: Default is `target` (from `profiles.yml`). Optional: specify a static name like `"my_database"`.
+
+🗂️ **schema**: Logical grouping of models. Common: `"stg"` (staging), `"mart"` (analytics layer).
+
+🏷️ **tags**: List of labels for grouping/selecting models. Example: `["dim", "user"]`
+
+📚 **docs**: Controls model visibility in dbt Docs. Default: `{ "show": true }`
+
+📝 **persist\_docs**: Persists documentation in your warehouse (if supported). Example: `{ "relation": true, "columns": false }`
+
+🔐 **grants**: Sets RBAC permissions for the model. Example: `{ "select": ["role_analyst"] }`
+
+🚦 **access**: Controls model exposure level (dbt v1.5+). Default: `protected`. Options: `private`, `public`
+
+👥 **group**: Assigns model to a logical group for access and ownership. Example: `[my_group]`
+
+🧰 **pre\_hook**: SQL commands executed before the model builds. Example: `[ "GRANT SELECT ON TABLE {{ this }} TO role_analyst" ]`
+
+🧪 **post\_hook**: SQL commands executed after the model builds. Example: `[ "ANALYZE TABLE {{ this }} COMPUTE STATISTICS" ]`
+
+⏱️ **event\_time**: Timestamp column for time-based filtering. Options: `created_at`, `updated_at`
+
+♻️ **full\_refresh**: Forces a full rebuild of the model. Default: `false`. Set `true` to force.
+
+🔑 **unique\_key**: Primary key(s) for incremental/snapshot models. Example: `["id"]`
+
+</details>
+
+<details>
+  <summary> <h3>📚 Model Configuration</h3></summary>
+
+| Option | Example |
+| --- | --- |
+| `freshness` | ```{"build_after": { "count": <positive_integer>, "period": "minute", "hour", "day", "updates_on": "any", "all" } }```|
+| `materialized` | `table`, `view`, `ephemeral`, `incremental` |
+| `batch_size` | `hour`, `day`, `month`, `year` |
+| `concurrent_batches` | Auto detect (default), `true`, `false` |
+| `on_configuration_change` | `apply`, `continue`, `fail` |
+| `sql_header` | `[ "alter session set timezone = 'Australia/Sydney';` |
+|
+
+</details>
+
+Details: [Model Configuration Docs](https://docs.getdbt.com/reference/model-configs)
 
 ---
 
 ## Testing
 
 ### Built-in Tests
+
 ```yaml
 # models/schema.yml
 models:
@@ -268,6 +309,7 @@ models:
 ```
 
 ### Custom Generic Tests
+
 ```sql
 -- tests/generic/test_positive_values.sql
 SELECT *
@@ -276,6 +318,7 @@ WHERE {{ column_name }} <= 0
 ```
 
 ### Singular Tests
+
 ```sql
 -- tests/assert_user_email_domains.sql
 SELECT email
@@ -285,6 +328,7 @@ WHERE email NOT LIKE '%@company.com'
 ```
 
 ### Data Quality Tests
+
 ```yaml
 models:
   - name: sales_summary
@@ -300,6 +344,7 @@ models:
 ## Documentation
 
 ### Model Documentation
+
 ```yaml
 # models/schema.yml
 models:
@@ -315,6 +360,7 @@ models:
 ```
 
 ### Generate Documentation
+
 ```bash
 # Generate docs
 dbt docs generate
@@ -324,17 +370,18 @@ dbt docs serve --port 8080
 ```
 
 ### Advanced Documentation
+
 ```yaml
 models:
   - name: user_metrics
     description: |
       ## User Engagement Metrics
-      
+
       This model calculates key user engagement metrics including:
       - Daily active users
       - Session duration
       - Feature adoption rates
-      
+
       ### Business Logic
       - Users are considered active if they have at least one session
       - Sessions timeout after 30 minutes of inactivity
@@ -348,6 +395,7 @@ models:
 ## Advanced Features
 
 ### Snapshots (SCD Type 2)
+
 ```sql
 -- snapshots/users_snapshot.sql
 {% snapshot users_snapshot %}
@@ -364,6 +412,7 @@ models:
 ```
 
 ### Seeds
+
 ```bash
 # Load CSV data
 dbt seed
@@ -373,6 +422,7 @@ dbt seed --select my_seed_file
 ```
 
 ### Hooks
+
 ```yaml
 # dbt_project.yml
 models:
@@ -382,6 +432,7 @@ models:
 ```
 
 ### Variables
+
 ```yaml
 # dbt_project.yml
 vars:
@@ -402,12 +453,13 @@ WHERE created_at >= '{{ var("start_date") }}'
 ## Best Practices
 
 ### 1. Project Organization
+
 ```
 models/
 ├── staging/           # 1:1 with source tables
 │   ├── base/         # Light transformation
-│   └── schema.yml    
-├── intermediate/      # Purpose-built transformations  
+│   └── schema.yml
+├── intermediate/      # Purpose-built transformations
 │   └── schema.yml
 └── marts/            # Business-ready models
     ├── core/         # Key business entities
@@ -416,11 +468,12 @@ models/
 ```
 
 ### 2. Naming Conventions
+
 ```sql
 -- Staging models
 stg_[source]__[table]     -- stg_salesforce__contacts
 
--- Intermediate models  
+-- Intermediate models
 int_[entity]_[verb]       -- int_users_aggregated
 
 -- Mart models
@@ -428,6 +481,7 @@ int_[entity]_[verb]       -- int_users_aggregated
 ```
 
 ### 3. Model Configuration Best Practices
+
 ```yaml
 # dbt_project.yml
 models:
@@ -436,12 +490,13 @@ models:
     staging:
       +materialized: view
     intermediate:
-      +materialized: ephemeral  
+      +materialized: ephemeral
     marts:
       +materialized: table
 ```
 
 ### 4. Performance Optimization
+
 ```sql
 -- Use appropriate materializations
 {{ config(materialized='incremental') }}
@@ -460,6 +515,7 @@ models:
 ```
 
 ### 5. Data Quality Standards
+
 ```yaml
 # Every primary key should be tested
 - name: user_id
@@ -475,6 +531,7 @@ models:
 ```
 
 ### 6. Version Control Best Practices
+
 ```bash
 # .gitignore
 target/
@@ -491,6 +548,7 @@ export DBT_PASSWORD="your_password"
 ## CLI Commands Cheat Sheet
 
 ### Basic Commands
+
 ```bash
 # Run all models
 dbt run
@@ -498,7 +556,7 @@ dbt run
 # Run specific model and downstream
 dbt run --select my_model+
 
-# Run specific model and upstream  
+# Run specific model and upstream
 dbt run --select +my_model
 
 # Run models in folder
@@ -515,6 +573,7 @@ dbt run --sample
 ```
 
 ### Testing Commands
+
 ```bash
 # Run all tests
 dbt test
@@ -530,6 +589,7 @@ dbt compile --strict
 ```
 
 ### Development Commands
+
 ```bash
 # Compile without running
 dbt compile
@@ -545,6 +605,7 @@ dbt docs generate && dbt docs serve
 ```
 
 ### Package Management
+
 ```bash
 # Install packages
 dbt deps
@@ -557,6 +618,7 @@ dbt list
 ```
 
 ### Advanced Selection
+
 ```bash
 # Modified models since last run
 dbt run --select state:modified
@@ -573,6 +635,7 @@ dbt run --select "staging,tag:hourly,+my_model"
 ## Jinja & Macros
 
 ### Basic Jinja
+
 ```sql
 -- Variables
 {% set my_var = 'value' %}
@@ -584,7 +647,7 @@ SELECT '{{ my_var }}' as column_name
   {% if not loop.last %} UNION ALL {% endif %}
 {% endfor %}
 
--- Conditionals  
+-- Conditionals
 {% if target.name == 'prod' %}
   SELECT * FROM production_table
 {% else %}
@@ -593,6 +656,7 @@ SELECT '{{ my_var }}' as column_name
 ```
 
 ### Custom Macros
+
 ```sql
 -- macros/get_date_parts.sql
 {% macro get_date_parts(date_column) %}
@@ -602,7 +666,7 @@ SELECT '{{ my_var }}' as column_name
 {% endmacro %}
 
 -- Usage in model
-SELECT 
+SELECT
     id,
     {{ get_date_parts('created_at') }},
     amount
@@ -610,6 +674,7 @@ FROM {{ source('sales', 'orders') }}
 ```
 
 ### Useful dbt_utils Macros
+
 ```sql
 -- Generate surrogate key
 {{ dbt_utils.generate_surrogate_key(['col1', 'col2']) }}
@@ -633,11 +698,12 @@ FROM {{ source('sales', 'orders') }}
 ## Performance Optimization
 
 ### 1. Choose Right Materializations
+
 ```sql
 -- High-volume, frequently queried: table
 {{ config(materialized='table') }}
 
--- Light transformations, infrequently queried: view  
+-- Light transformations, infrequently queried: view
 {{ config(materialized='view') }}
 
 -- Large datasets with regular updates: incremental
@@ -648,6 +714,7 @@ FROM {{ source('sales', 'orders') }}
 ```
 
 ### 2. Optimize Incremental Models
+
 ```sql
 {{ config(
     materialized='incremental',
@@ -663,6 +730,7 @@ SELECT * FROM {{ source('events', 'raw_events') }}
 ```
 
 ### 3. Use dbt-utils for Performance
+
 ```sql
 -- Efficient deduplication
 {{ dbt_utils.deduplicate(
@@ -673,6 +741,7 @@ SELECT * FROM {{ source('events', 'raw_events') }}
 ```
 
 ### 4. Warehouse-Specific Optimizations
+
 ```sql
 -- Snowflake
 {{ config(
@@ -686,7 +755,7 @@ SELECT * FROM {{ source('events', 'raw_events') }}
     cluster_by=['user_id', 'status']
 ) }}
 
--- Redshift  
+-- Redshift
 {{ config(
     sort=['date', 'user_id'],
     dist='user_id'
@@ -700,36 +769,47 @@ SELECT * FROM {{ source('events', 'raw_events') }}
 ### Common Issues & Solutions
 
 #### 1. Model Not Found
+
 ```
 Model 'my_model' not found
 ```
+
 **Solution**: Check model name, ensure it's in the models directory, run `dbt parse`
 
-#### 2. Circular Dependencies  
+#### 2. Circular Dependencies
+
 ```
 Circular dependency detected
 ```
+
 **Solution**: Review model dependencies with `dbt list --resource-type model --output json`
 
 #### 3. Compilation Errors
+
 ```
 Compilation Error: Undefined variable
-```  
+```
+
 **Solution**: Check variable names, ensure proper Jinja syntax
 
 #### 4. Schema Changes
+
 ```
 Schema mismatch in incremental model
 ```
+
 **Solution**: Use `--full-refresh` or set `on_schema_change='sync_all_columns'`
 
 #### 5. Memory Issues
+
 ```
 Out of memory error
 ```
+
 **Solution**: Reduce model complexity, use incremental materialization, optimize SQL
 
 ### Debug Commands
+
 ```bash
 # Check connection and setup
 dbt debug
@@ -745,6 +825,7 @@ dbt run --select my_model --log-level debug
 ```
 
 ### Log Analysis
+
 ```bash
 # Check recent logs
 tail -f logs/dbt.log
@@ -758,6 +839,7 @@ grep -i error logs/dbt.log
 ## dbt Core 1.10 New Features (2025)
 
 ### Sample Mode for Development
+
 ```bash
 # Run with sample data for faster iteration
 dbt run --sample
@@ -770,6 +852,7 @@ dbt run --sample
 ```
 
 ### Enhanced Validation
+
 ```bash
 # Stricter validation during compilation
 dbt compile --strict
@@ -779,6 +862,7 @@ dbt parse --validate
 ```
 
 ### Micro-batch Incremental Strategy
+
 ```sql
 {{ config(
     materialized='incremental',
@@ -789,6 +873,7 @@ dbt parse --validate
 ```
 
 ### Cost Management Features
+
 ```yaml
 # Monitor query costs
 models:
@@ -802,14 +887,15 @@ models:
 ## Quick Reference Cards
 
 ### Model Materialization Decision Tree
+
 ```
-Data Volume: High → Table or Incremental  
+Data Volume: High → Table or Incremental
 Data Volume: Low → View or Ephemeral
 
 Update Frequency: High → Incremental
 Update Frequency: Low → Table
 
-Query Frequency: High → Table  
+Query Frequency: High → Table
 Query Frequency: Low → View
 
 Complexity: High → Table
@@ -817,10 +903,11 @@ Complexity: Low → View
 ```
 
 ### Test Types Quick Guide
+
 ```yaml
 # Data integrity tests
 - unique              # No duplicates
-- not_null           # No missing values  
+- not_null           # No missing values
 - accepted_values    # Values in allowed list
 - relationships      # Foreign key constraints
 
@@ -832,8 +919,9 @@ Complexity: Low → View
 ```
 
 ### Performance Checklist
+
 - [ ] Use appropriate materialization
-- [ ] Implement incremental loading for large tables  
+- [ ] Implement incremental loading for large tables
 - [ ] Add clustering/partitioning for warehouse
 - [ ] Use ephemeral for intermediate transformations
 - [ ] Optimize join conditions and filters
